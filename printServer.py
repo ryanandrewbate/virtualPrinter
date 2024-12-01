@@ -13,7 +13,7 @@ import socket
 import atexit
 import select
 
-from virtualPrinter.windowsPrinters import WindowsPrinters
+#from virtualPrinter.windowsPrinters import WindowsPrinters
 
 PrintCallbackDocType=typing.Any
 
@@ -36,7 +36,6 @@ class PrintServer:
     def __init__(self,
         printerName:str='My Virtual Printer',
         ip:str='127.0.0.1',port:typing.Union[None,int,str]=None,
-        autoInstallPrinter:bool=True,
         printCallbackFn:typing.Optional[PrintCallbackFunctionType]=None):
         """
         You can do an ip other than 127.0.0.1 (localhost), but really
@@ -53,15 +52,14 @@ class PrintServer:
             if it is None, then will save it out to a file.
         """
         self.ip:str=ip
-        if port is None:
-            port=0 # meaning, "any unused port"
-        self.port:int=int(port)
+#        if port is None:
+ #           port=0 # meaning, "any unused port"
+        self.port:int=9101#int(port)
         self.buffersize:int=20  # Normally 1024, but we want fast response
-        self.autoInstallPrinter:bool=autoInstallPrinter
         self.printerName:str=printerName
         self.running:bool=False
         self.keepGoing:bool=False
-        self.osPrinterManager:typing.Optional[WindowsPrinters]=None
+        #self.osPrinterManager:typing.Optional[WindowsPrinters]=None
         self.printerPortName:typing.Optional[str]=None
         self.printCallbackFn:typing.Optional[
             PrintCallbackFunctionType]=printCallbackFn
@@ -70,35 +68,9 @@ class PrintServer:
         """
         Do some clean up when object is deleted
         """
-        if self: # this will always be called on program exit,
-            #      so may come in again if the object is already deleted
-            if self.autoInstallPrinter:
-                self._uninstallPrinter()
+        print("_del_ called")
 
-    def _installPrinter(self,ip:str,port:int)->None:
-        """
-        Install the printer to the ip address
-        """
-        atexit.register(self.__del__) # ensure that __del__ always
-        #                               gets called when the program exits
-        if os.name=='nt':
-            self.osPrinterManager=WindowsPrinters()
-            self.printerPortName=self.printerName+' Port'
-            makeDefault=False
-            comment='Virtual printer created in Python'
-            self.osPrinterManager.addPrinter(self.printerName,ip,port,
-                self.printerPortName,makeDefault,comment)
-        else:
-            print('WARN: Auto install not implemented for os {os.name}')
-
-    def _uninstallPrinter(self)->None:
-        """
-        remove the printer
-        """
-        if self.osPrinterManager:
-            self.osPrinterManager.removePrinter(self.printerName)
-            self.osPrinterManager.removePort(self.printerPortName)
-
+   
     def run(self)->None:
         """
         server mainloop
@@ -111,11 +83,9 @@ class PrintServer:
         sock.bind((self.ip,self.port))
         ip,port=sock.getsockname()
         print(f'Opening {ip}:{port}')
-        if self.autoInstallPrinter:
-            self._installPrinter(ip,port)
         #sock.setblocking(0)
         sock.listen(1)
-        newWay=True
+        #newWay=True
         buf:typing.List[str]
         while self.keepGoing:
             print('\nListening for incoming print job...')
@@ -133,15 +103,7 @@ class PrintServer:
             conn,addr=sock.accept()
             _=addr # not used for now
             #        could be interesting for remote prints tho
-            if self.printCallbackFn is None:
-                with open('I_printed_this.ps','wb') as f:
-                    while True:
-                        raw=conn.recv(self.buffersize)
-                        if not raw:
-                            break
-                        f.write(raw)
-                        f.flush()
-            elif newWay:
+            if self.printCallbackFn is not None:
                 buf=[]
                 while True:
                     raw=conn.recv(self.buffersize)
@@ -150,72 +112,17 @@ class PrintServer:
                     data=raw.decode('utf-8',errors='ignore')
                     buf.append(data)
                 combinedBuf=''.join(buf)
-                # get whatever meta info we can
-                author=None
-                title=None
-                filename=None
-                header='@'+combinedBuf.split('%!PS-',1)[0].split('@',1)[1]
-                #print header
-                for line in header.split('\n'):
-                    line=line.strip()
-                    if line.startswith('@PJL JOB NAME='):
-                        n=line.split('"',1)[1].rsplit('"',1)[0]
-                        if os.path.isfile(n):
-                            filename=n
-                        else:
-                            title=n
-                    elif line.startswith('@PJL COMMENT'):
-                        params=line.split('"',1)[1].rsplit('"',1)[0].split(';')
-                        for param in params:
-                            kv=param.split(':',1)
-                            if len(kv)>1:
-                                kv[0]=kv[0].strip().lower()
-                                kv[1]=kv[1].strip()
-                                if kv[0]=='username':
-                                    author=kv[1]
-                                elif kv[0]=='app filename':
-                                    if title is None:
-                                        if os.path.isfile(kv[1]):
-                                            filename=kv[1]
-                                        else:
-                                            title=kv[1]
-                if title is None and filename is not None:
-                    title=filename.rsplit(os.sep,1)[-1].split('.',1)[0]
-                self.printCallbackFn(buf,title,author,filename)
+                self.printCallbackFn(''.join(buf))
             else:
-                buf=[]
-                printjobHeader=[]
-                fillingBuf=False
-                while True:
-                    raw=conn.recv(self.buffersize)
-                    if not raw:
-                        break
-                    data=raw.decode('utf-8',errors='ignore')
-                    if not fillingBuf:
-                        i=data.find('%!PS-')
-                        if i<0:
-                            printjobHeader.append(data)
-                        elif i==0:
-                            buf.append(data)
-                            fillingBuf=True
-                        else:
-                            printjobHeader.append(data[0:i])
-                            buf.append(data[i:])
-                            fillingBuf=True
-                    else:
-                        buf.append(data)
-                if buf:
-                    self.printCallbackFn(''.join(buf),None,None,None)
+                print("No printCallbackFn")
             conn.close()
             time.sleep(0.1)
 
 
 if __name__=='__main__':
     import sys
-    port=9001
+    port=9101
     ip='127.0.0.1'
     runit=True
-    for arg in sys.argv[1:]:
-        pass # TODO: do args
     ps=PrintServer(ip=ip,port=port)
     ps.run()
